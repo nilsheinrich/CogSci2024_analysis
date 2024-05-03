@@ -52,7 +52,7 @@ Visual exploration might reflect exploring the action field (Kahl et al., 2022) 
 ```{julia}
 #| label: data
 
-all_fixations = DataFrame(Arrow.Table("data/Experiment1_FixationsComplete.arrow"))
+all_fixations = DataFrame(Arrow.Table("data/allFixations.arrow"))
 all_fixations = dropmissing(all_fixations, [:N_visible_obstacles, :N_visible_drift_tiles])
 
 # Filtering saccades with no amplitude
@@ -243,7 +243,7 @@ Only including fixations that are 5 visual degrees away from spaceship.
 ```{julia}
 #| label: data
 
-my_data = DataFrame(Arrow.Table("data/Experiment1_DistantFixations.arrow"))
+my_data = DataFrame(Arrow.Table("data/foveatedActionGoals.arrow"))
 my_data = dropmissing(my_data, [:N_visible_obstacles, :N_visible_drift_tiles])
 
 # Filtering fixations with duration less than 25 samples
