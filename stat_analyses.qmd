@@ -56,10 +56,10 @@ all_fixations = DataFrame(Arrow.Table("data/allFixations.arrow"))
 all_fixations = dropmissing(all_fixations, [:N_visible_obstacles, :N_visible_drift_tiles])
 
 # Filtering saccades with no amplitude
-all_fixations = all_fixations[(all_fixations.fixation_duration .>= 0.06), :]
+all_fixations = all_fixations[(all_fixations.fixation_duration .>= 0.0125), :]
 
 describe(all_fixations)
-size(all_fixations)  # 67794 rows
+size(all_fixations)  # 81748 rows
 ```
 
 ```{julia}
@@ -82,7 +82,7 @@ hypothesis_coding = Dict(
 #| label: pred_visExplore_1
 
 pred_visExplore_1 = let
-    formula = @formula(distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
+    formula = @formula(log(distance_to_spaceship) ~ 1 + N_visible_obstacles + input_noise 
     + (1 | N_visible_drift_tiles)
     + (1 | ID));
     fit(MixedModel, formula, all_fixations; contrasts=hypothesis_coding);
@@ -95,28 +95,29 @@ issingular(pred_visExplore_1)  # NOT overparameterized
 #| label: pred_visExplore_2
 
 pred_visExplore_2 = let
-    formula = @formula(distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
+    formula = @formula(log(distance_to_spaceship) ~ 1 + N_visible_obstacles + input_noise 
     + (1 + input_noise | N_visible_drift_tiles)
     + (1 + input_noise | ID));
     fit(MixedModel, formula, all_fixations; contrasts=hypothesis_coding);
   end
 
-issingular(pred_visExplore_2)  # overparameterized
+issingular(pred_visExplore_2)  # Overparameterized
 ```
 
 ```{julia}
 #| label: pred_visExplore_3
 
 pred_visExplore_3 = let
-    formula = @formula(distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
+    formula = @formula(log(distance_to_spaceship) ~ 1 + N_visible_obstacles + input_noise 
     + (1 + N_visible_obstacles | N_visible_drift_tiles)
     + (1 + N_visible_obstacles | ID));
     fit(MixedModel, formula, all_fixations; contrasts=hypothesis_coding);
   end
 
-issingular(pred_visExplore_3)  # NOT overparameterized
+issingular(pred_visExplore_3)  # Not overparameterized
 ```
 
+Throwing the two converging models against each other.
 ```{julia}
 
 gof_summary = let
@@ -135,29 +136,30 @@ gof_summary = let
     pvalue=vcat(:., round.(lrt.tests.pvalues, digits=3))
   )
 end
-```
-Referring to BIC (or AIC), the model with N_visible_obstacles as random slope effect wins.
 
-Stating zerocorr
+```
+pred_visExplore_3, the model with the random slope effect wins.
+
+Stating zero corr
 ```{julia}
 #| label: pred_visExplore_3_zc
 
 pred_visExplore_3_zc = let
-    formula = @formula(distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
+    formula = @formula(log(distance_to_spaceship) ~ 1 + N_visible_obstacles + input_noise 
     + zerocorr(1 + N_visible_obstacles | N_visible_drift_tiles)
     + zerocorr(1 + N_visible_obstacles | ID));
     fit(MixedModel, formula, all_fixations; contrasts=hypothesis_coding);
   end
 
-issingular(pred_visExplore_3_zc)  # NOT overparameterized
+issingular(pred_visExplore_3_zc)  # Not overparameterized
 ```
 
 ```{julia}
 
 gof_summary = let
-  nms = [:pred_visExplore_3, :pred_visExplore_3_zc]
+  nms = [:pred_visExplore_3_zc, :pred_visExplore_3]
   mods = eval.(nms)
-  lrt = MixedModels.likelihoodratiotest(pred_visExplore_3, pred_visExplore_3_zc)
+  lrt = MixedModels.likelihoodratiotest(pred_visExplore_3_zc, pred_visExplore_3)
   DataFrame(;
     name = nms, 
     dof=dof.(mods),
@@ -170,12 +172,13 @@ gof_summary = let
     pvalue=vcat(:., round.(lrt.tests.pvalues, digits=3))
   )
 end
+
 ```
-Zerocorr is mildly better. Will proceed using pred_visExplore_3_zc.
+pred_visExplore_3_zc wins when referring to BIC (not in terms of AIC though). We will proceed with pred_visExplore_3_zc.
 
 ### Model selection
 ```{julia}
-#| label: pred_visExplore_3_zc
+#| label: selected model
 
 pred_visExplore_3_zc = let
     formula = @formula(log(distance_to_spaceship) ~ 1 + N_visible_obstacles + input_noise 
@@ -184,8 +187,7 @@ pred_visExplore_3_zc = let
     fit(MixedModel, formula, all_fixations; contrasts=hypothesis_coding);
   end
 
-issingular(pred_visExplore_3_zc) # NOT overparameterized
-
+issingular(pred_visExplore_3_zc)  # Not overparameterized
 ```
 
 ```{julia}
@@ -200,16 +202,6 @@ We can visually verify having stated zero correlation between random effects.
 #|
 cm_visExplore_3_zc = first(ranefinfo(pred_visExplore_3_zc));
 caterpillar!(Figure(; resolution=(800, 1200)), cm_visExplore_3_zc; orderby=1)
-```
-
-### Shrinkage plot
-```{julia}
-#| code-fold: true
-#| label: fig-shrinkage
-#|
-#| fig-cap: Shrinkage plots of the subject random effects in the chosen model
-shrinkageplot!(Figure(; resolution=(1000, 1200)), pred_visExplore_3_zc)
-
 ```
 
 ### Bootstrapping
@@ -227,14 +219,9 @@ confint(samples_predVisExplore)
 ridgeplot(samples_predVisExplore; show_intercept=false, xlabel="Bootstrap density and 95%CI", title="Distance to agent (all fixations)")
 ```
 Results:
-- N_visible_obstacles [-0.211358, 0.0532378] X no effect
-- input_noise:weak vs. none [-0.308427, -0.103417]
-- input_noise:strong vs. weak [0.374834, 0.586183]
-
-on log-scale:
-- N_visible_obstacles [ -0.0279565, 0.025624] X no effect
-- input_noise:weak vs. none [-0.0358762, -0.0075744]
-- input_noise:strong vs. weak [0.000408187, 0.0299594]
+- N_visible_obstacles [-0.0197994, 0.0203652] X no effect
+- **input_noise:weak vs. none** [-0.0549274, -0.0283913] 
+- **input_noise:strong vs. weak** [0.00576066, 0.0334043]
 
 # Modeling spatial allocation of distant fixations
 Only including fixations that are 5 visual degrees away from spaceship.
@@ -248,10 +235,10 @@ my_data = dropmissing(my_data, [:N_visible_obstacles, :N_visible_drift_tiles])
 
 # Filtering fixations with duration less than 25 samples
 # fixdur >= 0.0125
-my_data = my_data[(my_data.fixation_duration .>= 0.06), :]
+my_data = my_data[(my_data.fixation_duration .>= 0.0125), :]
 
 describe(my_data)
-#size(my_data)  # 42315 rows
+#size(my_data)  # 43472 rows
 ```
 
 ### Contrasts
@@ -280,7 +267,7 @@ my_cake = Dict(
 #| label: pred_distAgent_1
 
 pred_distAgent_1 = let
-    formula = @formula(distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
+    formula = @formula(1/distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
     + (1 | N_visible_drift_tiles)
     + (1 | ID));
     fit(MixedModel, formula, my_data; contrasts=my_cake);
@@ -293,34 +280,35 @@ issingular(pred_distAgent_1)  # NOT overparameterized
 #| label: pred_distAgent_2
 
 pred_distAgent_2 = let
-    formula = @formula(distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
+    formula = @formula(1/distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
     + (1 + input_noise | N_visible_drift_tiles)
     + (1 + input_noise | ID));
     fit(MixedModel, formula, my_data; contrasts=my_cake);
   end
 
-issingular(pred_distAgent_2)  # overparameterized
+issingular(pred_distAgent_2)  # Overparameterized
 ```
 
 ```{julia}
 #| label: pred_distAgent_3
 
 pred_distAgent_3 = let
-    formula = @formula(distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
+    formula = @formula(1/distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
     + (1 + N_visible_obstacles | N_visible_drift_tiles)
     + (1 + N_visible_obstacles | ID));
     fit(MixedModel, formula, my_data; contrasts=my_cake);
   end
 
-issingular(pred_distAgent_3)  # overparameterized
+issingular(pred_distAgent_3)  # Overparameterized
 ```
 
 ### Model selection
+We will stick with pred_distAgent_1, as increasing model complexity will only lead to overparameterization.
 ```{julia}
-#| label: pred_distAgent_1
+#| label: selected model
 
 pred_distAgent_1 = let
-    formula = @formula(log(distance_to_spaceship) ~ 1 + N_visible_obstacles + input_noise 
+    formula = @formula(1/distance_to_spaceship ~ 1 + N_visible_obstacles + input_noise 
     + (1 | N_visible_drift_tiles)
     + (1 | ID));
     fit(MixedModel, formula, my_data; contrasts=my_cake);
@@ -343,16 +331,12 @@ confint(samples_pred_DistAgent)
 ```{julia}
 ridgeplot(samples_pred_DistAgent; show_intercept=false, xlabel="Bootstrap density and 95%CI", title="Distance to agent (distant fixations)")
 ```
-Replicated effects from visual exploration, but also found effect for **N_visible_obstacles** (complexity of visual environment) decreasing distance to agent.
+Replicated effects from visual exploration, but also found effect for **N_visible_obstacles** (complexity of visual environment) increasing distance to agent.
 Results:
-- N_visible_obstacles [-0.116628, -0.0822677]
-- input_noise:weak vs. none [-0.435594, -0.15973]
-- input_noise:strong vs. weak [0.4511, 0.73566]
+- N_visible_obstacles [0.00080819, 0.00102041]
+- input_noise:weak vs. none [0.00142275, 0.00311315]
+- input_noise:strong vs. weak [-0.00321808, -0.0014712]
 
-on log-scale:
-- N_visible_obstacles [-0.012224, -0.0100155]
-- input_noise:weak vs. none [-0.0340066, -0.0163282]
-- input_noise:strong vs. weak [0.0288485, 0.0470953]
 
 ## Modeling distance to nearest obstacle
 Here we have to control for variance caused by the varying number of obstacles on screen. We will therefore enter N_visible_obstacles as random intercept into the model.
@@ -381,12 +365,13 @@ pred_distObstacle_2 = let
     fit(MixedModel, formula, my_data; contrasts=my_cake);
   end
 
-issingular(pred_distObstacle_2)  # overparameterized
+issingular(pred_distObstacle_2)  # Overparameterized
 ```
 
 ### Model selection
+Sticking with pred_distObstacle_1
 ```{julia}
-#| label: pred_distObstacle_1
+#| label: selected model
 
 pred_distObstacle_1 = let
     formula = @formula(log(Dist_to_closest_obstacles) ~ 1 + input_noise
@@ -410,9 +395,6 @@ cm_distObstacle_1 = first(ranefinfo(pred_distObstacle_1));
 caterpillar!(Figure(; resolution=(800, 1200)), cm_distObstacle_1; orderby=1)
 ```
 
-### Shrinkage plot
-No random slopes specified...
-
 ### Bootstrapping
 ```{julia}
 samples_predDistObs = parametricbootstrap(RNG, N_iterations, pred_distObstacle_1)
@@ -428,8 +410,9 @@ confint(samples_predDistObs)
 ridgeplot(samples_predDistObs; show_intercept=false, xlabel="Bootstrap density and 95%CI", title="Distance to closest obstacle (distant fixations)")
 ```
 Results:
-- input_noise:weak vs. none [-0.00819449, 0.0107502] X
-- input_noise:strong vs. weak [-0.0121111, 0.00741021] X
+- input_noise:weak vs. none [-0.00532844, 0.0137108] X
+- input_noise:strong vs. weak [-0.0163602, 0.00301568] X
+no significant effects!
 
 **Investigating abandoning action goals by means of fixation duration**
 
@@ -529,26 +512,26 @@ gof_summary = let
   )
 end
 ```
-Referring to BIC (or AIC), pred_fixDur_3 including N_visible_obstacles as random slope effect best fits the data.
+Referring to BIC (or AIC), pred_fixDur_2 including input_noise as random slope effect best fits the data.
 
 ```{julia}
-#| label: pred_fixDur_3_zc
+#| label: pred_fixDur_2_zc
 
-pred_fixDur_3_zc = let
+pred_fixDur_2_zc = let
     formula = @formula(log(fixation_duration) ~ 1 + N_visible_obstacles + input_noise + drift_tile_onset
-    + zerocorr(1 + N_visible_obstacles | ID));
+    + zerocorr(1 + input_noise | ID));
     fit(MixedModel, formula, my_data; contrasts=my_cake);
   end
 
-issingular(pred_fixDur_3_zc)  # NOT overparameterized
+issingular(pred_fixDur_2_zc)  # NOT overparameterized
 ```
 
 ```{julia}
 
 gof_summary = let
-  nms = [:pred_fixDur_3, :pred_fixDur_3_zc]
+  nms = [:pred_fixDur_2, :pred_fixDur_2_zc]
   mods = eval.(nms)
-  lrt = MixedModels.likelihoodratiotest(pred_fixDur_3, pred_fixDur_3_zc)
+  lrt = MixedModels.likelihoodratiotest(pred_fixDur_2, pred_fixDur_2_zc)
   DataFrame(;
     name = nms, 
     dof=dof.(mods),
@@ -562,19 +545,19 @@ gof_summary = let
   )
 end
 ```
-Stating zerocorr is favored by BIC (and AIC). Proceed with pred_fixDur_3_zc.
+Stating zerocorr is favored by BIC (and AIC). Proceeding with pred_fixDur_2_zc.
 
 ### Model selection
 ```{julia}
-#| label: pred_fixDur_3_zc
+#| label: selected model
 
-pred_fixDur_3_zc = let
+pred_fixDur_2_zc = let
     formula = @formula(log(fixation_duration) ~ 1 + N_visible_obstacles + input_noise + drift_tile_onset
-    + zerocorr(1 + N_visible_obstacles | ID));
+    + zerocorr(1 + input_noise | ID));
     fit(MixedModel, formula, my_data; contrasts=my_cake);
   end
 
-issingular(pred_fixDur_3_zc)  # NOT overparameterized
+issingular(pred_fixDur_2_zc)  # NOT overparameterized
 
 ```
 
@@ -582,10 +565,10 @@ issingular(pred_fixDur_3_zc)  # NOT overparameterized
 We can visually verify having stated zero correlation between random effects.
 ```{julia}
 #| fig-cap1: Prediction intervals on subject random effects for selected model
-#| label: fig-pred_distObstacle_3_zc
+#| label: fig-pred_distObstacle_2_zc
 #|
-cm_fixDur_3_zc = first(ranefinfo(pred_fixDur_3_zc));
-caterpillar!(Figure(; resolution=(800, 1200)), cm_fixDur_3_zc; orderby=1)
+cm_fixDur_2_zc = first(ranefinfo(pred_fixDur_2_zc));
+caterpillar!(Figure(; resolution=(800, 1200)), cm_fixDur_2_zc; orderby=1)
 ```
 
 ### Shrinkage plot
@@ -594,13 +577,13 @@ caterpillar!(Figure(; resolution=(800, 1200)), cm_fixDur_3_zc; orderby=1)
 #| label: fig-shrinkage
 #|
 #| fig-cap: Shrinkage plots of the subject random effects in the chosen model
-shrinkageplot!(Figure(; resolution=(1000, 1200)), pred_fixDur_3_zc)
+shrinkageplot!(Figure(; resolution=(1000, 1200)), pred_fixDur_2_zc)
 
 ```
 
 ### Bootstrapping
 ```{julia}
-samples_predFixDur = parametricbootstrap(RNG, N_iterations, pred_fixDur_3_zc)
+samples_predFixDur = parametricbootstrap(RNG, N_iterations, pred_fixDur_2_zc)
 tbl = samples_predFixDur.tbl
 ```
 
@@ -613,8 +596,8 @@ confint(samples_predFixDur)
 ridgeplot(samples_predFixDur; show_intercept=false, xlabel="Bootstrap density and 95%CI", title="Fixation duration (distant fixations)")
 ```
 Results:
-- N_visible_obstacles [0.00541627, 0.0207796]
-- input_noise:weak vs. none [-0.00642773, 0.0241418] X
-- input_noise:strong vs. weak [-0.0353359, -0.0041089]
-- drift_tile_onset [0.426046, 0.514824]
+- N_visible_obstacles [-0.000416564, 0.0049019] X
+- input_noise:weak vs. none [-0.0904824, 0.140698] X
+- input_noise:strong vs. weak [-0.0876907, 0.03409] X
+- **drift_tile_onset** [0.630264, 0.766753]
 
